@@ -4,3 +4,4 @@ tag-talents.html
 *.log
 scrape-cache/
 .claude/
+CLAUDE.md

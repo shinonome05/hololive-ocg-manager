@@ -37,7 +37,7 @@ const state = {
   currentDeckIdx: -1,
   filters: {     // persisted
     kw: "", colors: [], types: [], blooms: [], rarities: [], sets: [], tags: [],
-    hpMin: null, hpMax: null, owned: "all", sort: "id", fold: true, talent: "",
+    owned: "all", sort: "id", fold: true, talent: "",
   },
   talentMap: {},  // card name -> [talent, ...] (curated, loaded from talents.json)
   talentCategories: {}, // category -> [talent label, ...] (loaded from talent-categories.json)
@@ -234,19 +234,6 @@ function setupFilters() {
     renderCollection();
   }, 200));
 
-  const hpMin = document.getElementById("hp-min");
-  const hpMax = document.getElementById("hp-max");
-  hpMin.value = state.filters.hpMin ?? "";
-  hpMax.value = state.filters.hpMax ?? "";
-  [hpMin, hpMax].forEach((el, i) => {
-    el.addEventListener("input", debounce(() => {
-      const k = i === 0 ? "hpMin" : "hpMax";
-      state.filters[k] = el.value === "" ? null : Number(el.value);
-      LS.save();
-      renderCollection();
-    }, 200));
-  });
-
   const sort = document.getElementById("sort");
   sort.value = state.filters.sort;
   sort.addEventListener("change", () => {
@@ -267,7 +254,7 @@ function setupFilters() {
 
   document.getElementById("reset-filters").addEventListener("click", () => {
     state.filters = { kw: "", colors: [], types: [], blooms: [], rarities: [], sets: [], tags: [],
-                      hpMin: null, hpMax: null, owned: "all", sort: "id", fold: true, talent: "" };
+                      owned: "all", sort: "id", fold: true, talent: "" };
     LS.save();
     location.reload(); // ponytail: simplest way to reset chip UI
   });
@@ -378,8 +365,6 @@ function matchesFilters(c, f) {
   if (f.sets?.length && !f.sets.includes(c.set)) return false;
   if (f.tags?.length && !c.tags?.some((t) => f.tags.includes(t))) return false;
   if (f.talent && !talentsOf(c).includes(f.talent)) return false;
-  if (f.hpMin != null && (c.hp ?? -1) < f.hpMin) return false;
-  if (f.hpMax != null && (c.hp ?? Infinity) > f.hpMax) return false;
   const owned = state.collection[c.id] || 0;
   if (f.owned === "owned" && owned === 0) return false;
   if (f.owned === "missing" && owned > 0) return false;
@@ -648,7 +633,10 @@ function renderDeckEditor() {
   header.querySelector("input").addEventListener("input", (e) => {
     deck.name = e.target.value;
     LS.save();
-    renderDeckList();
+    // Update only the sidebar label in place — re-rendering would recreate this
+    // input and steal focus on every keystroke.
+    const label = document.querySelector("#deck-list li.active > div:first-child");
+    if (label) label.textContent = deck.name;
   });
   header.querySelector('[data-act="code"]').addEventListener("click", () => copyDeckCode(deck));
   header.querySelector('[data-act="json"]').addEventListener("click", () => downloadDeckJson(deck));
@@ -738,8 +726,26 @@ function deckSectionEl(title, ids, deck, predicate, section, target) {
 // Per-section picker state (kept alive across re-renders so user keeps filters).
 const pickerState = {};
 function newPickerFilter() {
-  return { kw: "", colors: [], types: [], blooms: [], rarities: [], sets: [], tags: [],
-           hpMin: null, hpMax: null, owned: "all" };
+  return { kw: "", colors: [], types: [], blooms: [], rarities: [], sets: [], tags: [], owned: "all" };
+}
+
+// ---- Deckbuilding limits (hololive OCG rules) ----
+// Section totals: 1 oshi / 50 main / 20 cheer.
+const DECK_SECTION_MAX = { oshi: 1, main: 50, cheer: 20 };
+function deckSectionTotal(deck, section) {
+  return section === "oshi" ? (deck.oshi ? 1 : 0) : sumCounts(deck[section]);
+}
+// Copies of a given card NUMBER currently in a section (counts across rarities).
+function deckCountByNumber(deck, section, cardNumber) {
+  return Object.entries(deck[section]).reduce(
+    (a, [id, n]) => a + (state.cards[id]?.card_number === cardNumber ? n : 0), 0);
+}
+// Per-card-number copy cap. Infinity = no per-card cap (only the section total).
+// Exempt: Cheer cards, and Debut Holomem — those may repeat up to the section total.
+function deckPerCardLimit(card, section) {
+  if (section === "cheer") return Infinity;
+  if (card.type === "Holomem" && card.bloom_level === "Debut") return Infinity;
+  return 4;
 }
 
 function pickerEl(deck, predicate, section) {
@@ -802,15 +808,6 @@ function pickerEl(deck, predicate, section) {
   addGroup("稀有度", rarities, "rarities");
   addGroup("補充包", sets, "sets");
   addGroup("標籤", tags, "tags");
-  const hpG = document.createElement("div");
-  hpG.className = "pf-group";
-  hpG.innerHTML = `<span class="pf-title">HP</span>
-    <input type="number" class="pf-hp pf-hpmin" placeholder="min" value="${f.hpMin ?? ""}">
-    <span>～</span>
-    <input type="number" class="pf-hp pf-hpmax" placeholder="max" value="${f.hpMax ?? ""}">`;
-  hpG.querySelector(".pf-hpmin").addEventListener("input", debounce((e) => { f.hpMin = e.target.value === "" ? null : +e.target.value; update(); }, 200));
-  hpG.querySelector(".pf-hpmax").addEventListener("input", debounce((e) => { f.hpMax = e.target.value === "" ? null : +e.target.value; update(); }, 200));
-  panel.appendChild(hpG);
 
   const update = () => {
     const candidates = eligible.filter((c) => matchesFilters(c, f));
@@ -846,17 +843,20 @@ function pickerEl(deck, predicate, section) {
         if (!c) return;
         if (section === "oshi") {
           deck.oshi = c.id;
+        } else if (e.shiftKey) {
+          deck[section][c.id] = Math.max(0, (deck[section][c.id] || 0) - 1);
+          if (deck[section][c.id] === 0) delete deck[section][c.id];
         } else {
-          const sameName = Object.entries(deck[section])
-            .filter(([cid]) => state.cards[cid]?.name === c.name)
-            .reduce((a, [, n]) => a + n, 0);
-          if (e.shiftKey) {
-            deck[section][c.id] = Math.max(0, (deck[section][c.id] || 0) - 1);
-            if (deck[section][c.id] === 0) delete deck[section][c.id];
-          } else {
-            if (sameName >= 4) { alert(`「${c.name}」已達 4 張上限`); return; }
-            deck[section][c.id] = (deck[section][c.id] || 0) + 1;
+          if (deckSectionTotal(deck, section) >= DECK_SECTION_MAX[section]) {
+            alert(`${section === "main" ? "主牌組" : "應援牌組"}已達 ${DECK_SECTION_MAX[section]} 張上限`);
+            return;
           }
+          const limit = deckPerCardLimit(c, section);
+          if (limit !== Infinity && deckCountByNumber(deck, section, c.card_number) >= limit) {
+            alert(`「${c.name}」(${c.card_number}) 已達 ${limit} 張上限`);
+            return;
+          }
+          deck[section][c.id] = (deck[section][c.id] || 0) + 1;
         }
         LS.save();
         renderDeckList();
@@ -1161,6 +1161,8 @@ function showScanResult(ranked, snapUrl) {
     });
   });
   box.querySelector("#scan-dismiss").addEventListener("click", () => (box.innerHTML = ""));
+  // On mobile the camera fills the top; bring the candidate list into view.
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 // ============== DECK CODE (reversible, NOT a hash) ==============
@@ -1239,9 +1241,10 @@ function decodeDeck(code) {
 
 function copyDeckCode(deck) {
   const code = encodeDeck(deck);
+  const note = "\n\n（此牌組碼僅供本頁使用，與官方 Deck Log 不互通）";
   navigator.clipboard?.writeText(code).then(
-    () => alert("牌組碼已複製到剪貼簿：\n\n" + code),
-    () => prompt("複製失敗，請手動複製牌組碼：", code),
+    () => alert("牌組碼已複製到剪貼簿：\n\n" + code + note),
+    () => prompt("複製失敗，請手動複製牌組碼：" + note, code),
   );
 }
 
@@ -1255,7 +1258,7 @@ function downloadDeckJson(deck) {
 }
 
 function importDeckPrompt() {
-  const input = prompt("貼上牌組碼 (HOCG1-…) 或牌組 JSON：");
+  const input = prompt("貼上牌組碼 (HOCG1-…) 或牌組 JSON：\n\n⚠️ 注意：此牌組碼僅供本頁使用，與官方 Deck Log 的牌組碼不互通。");
   if (!input) return;
   let deck;
   try {

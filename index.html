@@ -16,7 +16,7 @@
   <nav class="tabs">
     <button class="tab active" data-tab="collection">収藏</button>
     <button class="tab" data-tab="decks">牌組</button>
-    <button class="tab" data-tab="scan">掃描</button>
+    <button class="tab" data-tab="scan">掃描 <span class="beta">測試中</span></button>
   </nav>
   <div class="header-actions">
     <button id="export-btn" title="匯出全部備份 JSON（卡庫＋所有牌組）">⇧ 備份JSON</button>
@@ -47,15 +47,6 @@
       <div class="filter-group">
         <h4>Bloom</h4>
         <div id="f-bloom" class="chips"></div>
-      </div>
-
-      <div class="filter-group">
-        <h4>HP</h4>
-        <div class="range">
-          <input type="number" id="hp-min" placeholder="最小" min="0" step="10">
-          <span>～</span>
-          <input type="number" id="hp-max" placeholder="最大" min="0" step="10">
-        </div>
       </div>
 
       <div class="filter-group">
@@ -129,6 +120,7 @@
 
   <!-- ============== SCAN TAB ============== -->
   <section id="scan" class="tab-panel">
+    <div class="scan-beta">🧪 掃描功能<strong>測試中</strong>，辨識結果僅供參考，請確認後再加入。</div>
     <div class="scan-controls">
       <button id="start-camera">開啟相機</button>
       <button id="capture" disabled>拍攝 + 辨識</button>

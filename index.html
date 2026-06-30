@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Hololive OCG Manager</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="copyright-bar">
+  カード画像・データ © COVER Corp. ／ hololive production ・ 非官方粉絲工具 (Unofficial fan tool)
+  <button id="about-link" class="linklike">關於／問題反饋</button>
+</div>
+<header>
+  <h1>Hololive OCG Manager</h1>
+  <nav class="tabs">
+    <button class="tab active" data-tab="collection">収藏</button>
+    <button class="tab" data-tab="decks">牌組</button>
+    <button class="tab" data-tab="scan">掃描</button>
+  </nav>
+  <div class="header-actions">
+    <button id="export-btn" title="匯出全部備份 JSON（卡庫＋所有牌組）">⇧ 備份JSON</button>
+    <input type="file" id="import-file" accept=".json" hidden>
+    <button id="import-btn" title="從 JSON 還原全部備份">⇩ 還原JSON</button>
+    <button id="backup-code-link" title="把全部收藏＋牌組轉成備份碼（可貼上分享/還原）">⧉ 備份碼</button>
+  </div>
+</header>
+
+<main>
+  <!-- ============== COLLECTION TAB ============== -->
+  <section id="collection" class="tab-panel active">
+    <aside class="filters">
+      <div class="filter-group">
+        <input type="search" id="kw" placeholder="關鍵字 (名字/卡號/技能文字)…">
+      </div>
+
+      <div class="filter-group">
+        <h4>顏色</h4>
+        <div id="f-color" class="chips"></div>
+      </div>
+
+      <div class="filter-group">
+        <h4>類型</h4>
+        <div id="f-type" class="chips"></div>
+      </div>
+
+      <div class="filter-group">
+        <h4>Bloom</h4>
+        <div id="f-bloom" class="chips"></div>
+      </div>
+
+      <div class="filter-group">
+        <h4>HP</h4>
+        <div class="range">
+          <input type="number" id="hp-min" placeholder="最小" min="0" step="10">
+          <span>～</span>
+          <input type="number" id="hp-max" placeholder="最大" min="0" step="10">
+        </div>
+      </div>
+
+      <div class="filter-group">
+        <h4>稀有度</h4>
+        <div id="f-rarity" class="chips"></div>
+      </div>
+
+      <div class="filter-group">
+        <h4>補充包</h4>
+        <div id="f-set" class="chips chips-small"></div>
+      </div>
+
+      <div class="filter-group">
+        <h4>標籤</h4>
+        <div id="f-tag" class="chips chips-small"></div>
+      </div>
+
+      <div class="filter-group">
+        <h4>藝人 (talent)</h4>
+        <select id="f-talent">
+          <option value="">（全部藝人）</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <h4>持有狀態</h4>
+        <div id="f-owned" class="chips">
+          <button class="chip" data-val="all">全部</button>
+          <button class="chip" data-val="owned">只看持有</button>
+          <button class="chip" data-val="missing">只看未持有</button>
+        </div>
+      </div>
+
+      <div class="filter-group">
+        <h4>排序</h4>
+        <select id="sort">
+          <option value="id">卡號</option>
+          <option value="name">名字</option>
+          <option value="hp">HP</option>
+          <option value="rarity">稀有度</option>
+        </select>
+      </div>
+
+      <button id="reset-filters">清除篩選</button>
+    </aside>
+
+    <div class="grid-wrap">
+      <div class="status-bar">
+        <button id="filter-toggle" class="mobile-only" aria-label="開啟篩選">⚙ 篩選</button>
+        <span id="result-count"></span>
+        <span id="collection-total"></span>
+        <label class="fold-toggle"><input type="checkbox" id="fold-same"> 摺疊同號卡</label>
+      </div>
+      <div id="card-grid" class="card-grid"></div>
+    </div>
+  </section>
+
+  <!-- ============== DECKS TAB ============== -->
+  <section id="decks" class="tab-panel">
+    <aside class="deck-list">
+      <h3>牌組</h3>
+      <ul id="deck-list"></ul>
+      <button id="new-deck">＋ 新增牌組</button>
+      <button id="import-deck">⇩ 匯入牌組碼/JSON</button>
+    </aside>
+
+    <div class="deck-editor" id="deck-editor">
+      <div class="empty-state">選擇或新增一個牌組</div>
+    </div>
+  </section>
+
+  <!-- ============== SCAN TAB ============== -->
+  <section id="scan" class="tab-panel">
+    <div class="scan-controls">
+      <button id="start-camera">開啟相機</button>
+      <button id="capture" disabled>拍攝 + 辨識</button>
+      <button id="stop-camera" disabled>關閉相機</button>
+      <label><input type="checkbox" id="continuous"> 連續模式</label>
+      <span id="scan-status"></span>
+    </div>
+
+    <div class="scan-stage">
+      <div class="video-box">
+        <video id="video" playsinline></video>
+        <div class="guide-frame card-frame"><span class="guide-label">把整張卡對齊框內</span></div>
+      </div>
+      <canvas id="canvas" hidden></canvas>
+
+      <div id="scan-result" class="scan-result"></div>
+    </div>
+
+    <details class="scan-help">
+      <summary>使用提示</summary>
+      <p>用卡圖比對：把<strong>整張卡</strong>放進框裡（不必對準卡號），按「拍攝」。</p>
+      <p>系統用卡圖的感知雜湊跟資料庫比對，列出最相似的前 6 張，點選正確的那張即可。</p>
+      <p>距離越小越像：≤10 信心高、≤16 中等、更大代表光線/角度需調整再拍。</p>
+      <p>連續模式：加入後直接拍下一張，適合一次掃整盒。</p>
+    </details>
+  </section>
+</main>
+
+<!-- full backup code -->
+<dialog id="backup-code">
+  <h2>全部備份碼</h2>
+  <p class="bc-hint">包含所有持有卡牌與牌組。「產生」後複製文字保存；要還原時貼上再按「還原」。</p>
+  <textarea id="backup-code-text" rows="6" placeholder="按「產生備份碼」後會出現在這裡；或貼上既有備份碼以還原…"></textarea>
+  <div class="bc-actions">
+    <button id="backup-gen">產生備份碼（並複製）</button>
+    <button id="backup-restore">從備份碼還原</button>
+    <button id="backup-code-close">關閉</button>
+  </div>
+</dialog>
+
+<!-- about / contact -->
+<dialog id="about">
+  <h2>關於 ／ 問題反饋</h2>
+  <p>個人非營利專案，僅供玩家測試自用，內容僅供參考，不供官方大賽使用。</p>
+  <p class="dis-credit">カード画像・データ © COVER Corp. ／ hololive production</p>
+  <div id="about-contact"></div>
+  <button id="about-close">關閉</button>
+</dialog>
+
+<!-- entry disclaimer -->
+<dialog id="disclaimer">
+  <h2>使用聲明</h2>
+  <p>個人非營利專案，僅供玩家測試自用，內容僅供參考，不供官方大賽使用。</p>
+  <p class="dis-credit">カード画像・データ © COVER Corp. ／ hololive production</p>
+  <button id="disclaimer-ok">我了解</button>
+</dialog>
+
+<!-- card detail modal -->
+<dialog id="card-modal">
+  <div id="card-modal-body"></div>
+  <button id="card-modal-close">關閉</button>
+</dialog>
+
+<script src="app.js" defer></script>
+</body>
+</html>

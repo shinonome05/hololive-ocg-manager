@@ -601,9 +601,37 @@ main { flex: 1; overflow: hidden; position: relative; }
   border-left: 3px solid var(--danger);
   border-radius: 4px;
 }
-.shopping-list h4 { margin: 0 0 8px; color: var(--danger); }
+.shopping-list h4 { margin: 0 0 8px; color: var(--danger); display: flex; align-items: center; gap: 10px; }
 .shopping-list ul { margin: 0; padding-left: 18px; }
 .shopping-list li { font-family: monospace; font-size: 12px; }
+.shop-img-btn {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  padding: 3px 10px; border-radius: 4px; cursor: pointer; font: inherit; font-size: 12px;
+}
+.shop-img-btn:hover { border-color: var(--accent); }
+
+/* Deck "add cards" area: segmented pile toggle + one big collection-style browser */
+.deck-adder { margin: 16px 0; }
+.adder-tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+.adder-tab {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+.adder-tab:hover { border-color: var(--accent); color: var(--text); }
+.adder-tab.active { background: var(--accent); color: #111; border-color: var(--accent); }
+/* larger, collection-like grid inside the adder */
+.deck-adder .picker-results {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  max-height: 60vh;
+  gap: 10px;
+}
 
 .deck-card-picker {
   margin-top: 8px;
@@ -644,6 +672,17 @@ main { flex: 1; overflow: hidden; position: relative; }
 .picker-filters.collapsed { display: none; }
 .pf-group { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .pf-title { font-size: 11px; color: var(--text-dim); min-width: 44px; }
+.pf-talent {
+  flex: 1;
+  min-width: 140px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 6px;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+}
 .pf-hp {
   width: 64px;
   background: var(--panel);
@@ -970,35 +1009,24 @@ dialog::backdrop { background: rgba(0,0,0,0.6); }
     font-size: 18px;
   }
 
-  /* Decks: deck list becomes horizontal scroller above editor */
+  /* Decks: deck list stacks vertically above the editor */
   #decks { flex-direction: column; }
   .deck-list {
     width: auto;
-    flex-direction: row;
-    align-items: center;
-    overflow-x: auto;
-    overflow-y: hidden;
+    flex-direction: column;
     border-right: none;
     border-bottom: 1px solid var(--border);
     padding: 8px;
     gap: 6px;
     flex-shrink: 0;
+    max-height: 40vh;      /* cap so the editor stays reachable; list scrolls */
+    overflow-y: auto;
   }
-  .deck-list h3 { display: none; }
-  .deck-list ul {
-    display: flex;
-    flex-direction: row;
-    gap: 6px;
-    flex: 0 1 auto;
-    overflow: visible;
-  }
-  .deck-list li {
-    white-space: nowrap;
-    padding: 6px 10px;
-    flex-shrink: 0;
-  }
-  .deck-list li .deck-stats { font-size: 10px; }
-  #new-deck { flex-shrink: 0; padding: 6px 12px; }
+  .deck-list h3 { display: block; margin: 0 0 4px; font-size: 13px; }
+  .deck-list ul { display: block; }
+  .deck-list li { padding: 8px 10px; }
+  .deck-list li .deck-stats { font-size: 11px; }
+  #new-deck, #import-deck { flex-shrink: 0; }
   .deck-editor { padding: 12px; }
   .deck-cards { grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 6px; }
   .picker-results { grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); max-height: 280px; }

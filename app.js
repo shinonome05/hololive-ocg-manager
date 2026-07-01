@@ -135,7 +135,6 @@ async function init() {
   setupFilters();
   setupDeckList();
   setupScan();
-  setupImportExport();
   setupBackupCode();
   setupModal();
 
@@ -379,7 +378,6 @@ function sortCards(cards) {
   const k = state.filters.sort;
   return cards.slice().sort((a, b) => {
     if (k === "name") return a.name.localeCompare(b.name, "ja");
-    if (k === "hp") return (b.hp || 0) - (a.hp || 0);
     if (k === "rarity") {
       return (RARITY_ORDER.indexOf(a.rarity) + 100) - (RARITY_ORDER.indexOf(b.rarity) + 100);
     }
@@ -590,16 +588,34 @@ function setupDeckList() {
   document.getElementById("import-deck").addEventListener("click", importDeckPrompt);
 }
 
+const DECK_SECTIONS = [
+  { key: "oshi", label: "推し", target: 1 },
+  { key: "main", label: "主牌組", target: 50 },
+  { key: "cheer", label: "應援", target: 20 },
+];
+const SECTION_PREDICATE = {
+  oshi: (c) => c.type === "Oshi",
+  main: (c) => ["Holomem", "BuzzHolomem", "Support"].includes(c.type),
+  cheer: (c) => c.type === "Cheer",
+};
+let deckPickSection = "main";     // which pile the adder is currently adding to
+let activePickerRefresh = null;   // refresh the current adder picker's badges (keeps scroll)
+
+function deckStatsText(d) {
+  return `主 ${sumCounts(d.main)}/50 ・ 應援 ${sumCounts(d.cheer)}/20 ${d.oshi ? "・ 推し ✓" : ""}`;
+}
+function updateSidebarStats(deck) {
+  const el = document.querySelector("#deck-list li.active .deck-stats");
+  if (el) el.textContent = deckStatsText(deck);
+}
+
 function renderDeckList() {
   const ul = document.getElementById("deck-list");
   ul.innerHTML = "";
   state.decks.forEach((d, i) => {
-    const mainCount = sumCounts(d.main);
-    const cheerCount = sumCounts(d.cheer);
     const li = document.createElement("li");
     li.className = i === state.currentDeckIdx ? "active" : "";
-    li.innerHTML = `<div>${escapeText(d.name)}</div>
-      <div class="deck-stats">主 ${mainCount}/50 ・ 應援 ${cheerCount}/20 ${d.oshi ? "・ 推し ✓" : ""}</div>`;
+    li.innerHTML = `<div>${escapeText(d.name)}</div><div class="deck-stats">${deckStatsText(d)}</div>`;
     li.addEventListener("click", () => {
       state.currentDeckIdx = i;
       renderDeckList();
@@ -607,7 +623,6 @@ function renderDeckList() {
     });
     ul.appendChild(li);
   });
-  if (state.currentDeckIdx >= 0) renderDeckEditor();
 }
 
 function renderDeckEditor() {
@@ -620,76 +635,82 @@ function renderDeckEditor() {
   if (!deck) return;
 
   editor.innerHTML = "";
+  editor.appendChild(deckHeaderEl(deck));
+  const sections = document.createElement("div");
+  sections.id = "deck-sections";
+  editor.appendChild(sections);
+  editor.appendChild(deckAdderEl(deck));
+  const shop = document.createElement("div");
+  shop.id = "deck-shopping";
+  editor.appendChild(shop);
+  renderDeckSections(deck);
+  renderShopping(deck);
+}
 
-  // Header
+// Refresh the deck views after a change WITHOUT rebuilding the adder/picker
+// (so the card browser keeps its scroll position and filters).
+function refreshDeckAfterChange(deck) {
+  renderDeckSections(deck);
+  renderShopping(deck);
+  updateSidebarStats(deck);
+}
+
+function deckHeaderEl(deck) {
   const header = document.createElement("div");
   header.className = "deck-header";
   header.innerHTML = `
     <input type="text" value="${escapeAttr(deck.name)}">
     <button data-act="code" title="複製可分享的牌組碼">牌組碼</button>
-    <button data-act="json" title="下載此牌組 JSON">JSON</button>
+    <button data-act="img" title="把牌組匯出成圖片">匯出圖片</button>
     <button data-act="duplicate">複製</button>
     <button data-act="delete" class="danger">刪除</button>`;
   header.querySelector("input").addEventListener("input", (e) => {
     deck.name = e.target.value;
     LS.save();
-    // Update only the sidebar label in place — re-rendering would recreate this
-    // input and steal focus on every keystroke.
     const label = document.querySelector("#deck-list li.active > div:first-child");
     if (label) label.textContent = deck.name;
   });
   header.querySelector('[data-act="code"]').addEventListener("click", () => copyDeckCode(deck));
-  header.querySelector('[data-act="json"]').addEventListener("click", () => downloadDeckJson(deck));
+  header.querySelector('[data-act="img"]').addEventListener("click", () => exportDeckImage(deck));
   header.querySelector('[data-act="delete"]').addEventListener("click", () => {
     if (!confirm(`刪除 "${deck.name}"？`)) return;
     state.decks.splice(state.currentDeckIdx, 1);
     state.currentDeckIdx = -1;
     LS.save();
     renderDeckList();
+    renderDeckEditor();
   });
   header.querySelector('[data-act="duplicate"]').addEventListener("click", () => {
     state.decks.push(JSON.parse(JSON.stringify({ ...deck, name: deck.name + " (副本)" })));
     state.currentDeckIdx = state.decks.length - 1;
     LS.save();
     renderDeckList();
+    renderDeckEditor();
   });
-  editor.appendChild(header);
-
-  // Oshi section
-  editor.appendChild(deckSectionEl("推し (1)", deck.oshi ? [deck.oshi] : [], deck,
-    (card) => card.type === "Oshi", "oshi", 1));
-
-  // Main section
-  editor.appendChild(deckSectionEl("主牌組 (50)", Object.keys(deck.main), deck,
-    (card) => card.type === "Holomem" || card.type === "BuzzHolomem" || card.type === "Support",
-    "main", 50));
-
-  // Cheer section
-  editor.appendChild(deckSectionEl("應援牌組 (20)", Object.keys(deck.cheer), deck,
-    (card) => card.type === "Cheer", "cheer", 20));
-
-  // Shopping list
-  editor.appendChild(shoppingListEl(deck));
+  return header;
 }
 
-function deckSectionEl(title, ids, deck, predicate, section, target) {
+function renderDeckSections(deck) {
+  const host = document.getElementById("deck-sections");
+  if (!host) return;
+  host.innerHTML = "";
+  DECK_SECTIONS.forEach((s) => host.appendChild(deckSectionEl(s, deck)));
+}
+
+// Display of what's currently in one section (click a card = −1). No picker here.
+function deckSectionEl(s, deck) {
+  const ids = s.key === "oshi" ? (deck.oshi ? [deck.oshi] : []) : Object.keys(deck[s.key]);
+  const count = s.key === "oshi" ? (deck.oshi ? 1 : 0) : sumCounts(deck[s.key]);
   const sec = document.createElement("section");
   sec.className = "deck-section";
-
-  let count;
-  if (section === "oshi") count = deck.oshi ? 1 : 0;
-  else count = sumCounts(deck[section]);
-
-  const klass = count === target ? "ok" : (count > target ? "warn" : "");
-  sec.innerHTML = `<h3>${title} <span class="count ${klass}">${count}/${target}</span></h3>`;
-
+  const klass = count === s.target ? "ok" : (count > s.target ? "warn" : "");
+  sec.innerHTML = `<h3>${s.label} (${s.target}) <span class="count ${klass}">${count}/${s.target}</span></h3>`;
   const cards = document.createElement("div");
   cards.className = "deck-cards";
-
   ids.forEach((id) => {
     const c = state.cards[id];
     if (!c) return;
-    const want = section === "oshi" ? 1 : deck[section][id];
+    const want = s.key === "oshi" ? 1 : deck[s.key][id];
     const owned = state.collection[id] || 0;
     const missing = Math.max(0, want - owned);
     const item = document.createElement("div");
@@ -699,34 +720,68 @@ function deckSectionEl(title, ids, deck, predicate, section, target) {
       <span class="count ${missing > 0 ? "missing" : ""}">×${want}</span>`;
     item.title = `${c.name} (${c.id}) — 持有 ${owned}` + (missing ? ` — 缺 ${missing}` : "");
     item.addEventListener("click", (e) => {
-      if (e.shiftKey) {
-        // shift-click = remove all of this card
-        if (section === "oshi") deck.oshi = null;
-        else delete deck[section][id];
-      } else {
-        // click = -1
-        if (section === "oshi") deck.oshi = null;
-        else {
-          deck[section][id] = (deck[section][id] || 0) - 1;
-          if (deck[section][id] <= 0) delete deck[section][id];
-        }
+      if (s.key === "oshi") deck.oshi = null;
+      else if (e.shiftKey) delete deck[s.key][id];
+      else {
+        deck[s.key][id] = (deck[s.key][id] || 0) - 1;
+        if (deck[s.key][id] <= 0) delete deck[s.key][id];
       }
       LS.save();
-      renderDeckList();
+      refreshDeckAfterChange(deck);
+      if (activePickerRefresh) activePickerRefresh();
     });
     cards.appendChild(item);
   });
   sec.appendChild(cards);
-
-  // Picker to add cards
-  sec.appendChild(pickerEl(deck, predicate, section));
   return sec;
+}
+
+// The "add cards" area: a segmented toggle (which pile) + one big collection-style
+// card browser for the active pile.
+function deckAdderEl(deck) {
+  const wrap = document.createElement("div");
+  wrap.className = "deck-adder";
+  const tabs = document.createElement("div");
+  tabs.className = "adder-tabs";
+  DECK_SECTIONS.forEach((s) => {
+    const b = document.createElement("button");
+    b.className = "adder-tab" + (deckPickSection === s.key ? " active" : "");
+    b.textContent = "加入" + s.label;
+    b.addEventListener("click", () => {
+      deckPickSection = s.key;
+      tabs.querySelectorAll(".adder-tab").forEach((x) => x.classList.toggle("active", x === b));
+      renderAdderPicker();
+    });
+    tabs.appendChild(b);
+  });
+  wrap.appendChild(tabs);
+  const host = document.createElement("div");
+  host.className = "adder-picker-host";
+  wrap.appendChild(host);
+  function renderAdderPicker() {
+    host.innerHTML = "";
+    host.appendChild(pickerEl(deck, SECTION_PREDICATE[deckPickSection], deckPickSection));
+  }
+  renderAdderPicker();
+  return wrap;
 }
 
 // Per-section picker state (kept alive across re-renders so user keeps filters).
 const pickerState = {};
 function newPickerFilter() {
-  return { kw: "", colors: [], types: [], blooms: [], rarities: [], sets: [], tags: [], owned: "all" };
+  return { kw: "", colors: [], types: [], blooms: [], rarities: [], sets: [], tags: [], owned: "all", talent: "" };
+}
+
+// Build the grouped talent <select> HTML shared by collection + picker.
+function talentSelectOptionsHtml() {
+  let html = `<option value="">（全部藝人）</option>`;
+  for (const [cat, talents] of Object.entries(state.talentCategories || {})) {
+    if (!talents || !talents.length) continue;
+    html += `<optgroup label="${escapeAttr(cat)}">` +
+      talents.map((t) => `<option value="${escapeAttr(canonicalTalent(t))}">${escapeText(t)}</option>`).join("") +
+      `</optgroup>`;
+  }
+  return html;
 }
 
 // ---- Deckbuilding limits (hololive OCG rules) ----
@@ -808,6 +863,19 @@ function pickerEl(deck, predicate, section) {
   addGroup("稀有度", rarities, "rarities");
   addGroup("補充包", sets, "sets");
   addGroup("標籤", tags, "tags");
+  // Talent filter — same grouped dropdown as the collection page
+  if (Object.keys(state.talentCategories || {}).length) {
+    const g = document.createElement("div");
+    g.className = "pf-group";
+    g.innerHTML = `<span class="pf-title">藝人</span>`;
+    const sel = document.createElement("select");
+    sel.className = "pf-talent";
+    sel.innerHTML = talentSelectOptionsHtml();
+    sel.value = f.talent || "";
+    sel.addEventListener("change", () => { f.talent = sel.value; update(); });
+    g.appendChild(sel);
+    panel.appendChild(g);
+  }
 
   const update = () => {
     const candidates = eligible.filter((c) => matchesFilters(c, f));
@@ -859,10 +927,14 @@ function pickerEl(deck, predicate, section) {
           deck[section][c.id] = (deck[section][c.id] || 0) + 1;
         }
         LS.save();
-        renderDeckList();
+        // refresh deck views + this picker's badges, keeping the browse scroll
+        refreshDeckAfterChange(deck);
+        const st = results.scrollTop; update(); results.scrollTop = st;
       });
     });
   };
+  // let deck-side edits (removing a card) refresh this picker's ✓ badges in place
+  activePickerRefresh = () => { const st = results.scrollTop; update(); results.scrollTop = st; };
 
   toolbar.querySelector("input").addEventListener("input", debounce((e) => { f.kw = e.target.value; update(); }, 150));
   toolbar.querySelector(".picker-filter-toggle").addEventListener("click", (e) => {
@@ -882,24 +954,193 @@ function pickerEl(deck, predicate, section) {
   return wrap;
 }
 
-function shoppingListEl(deck) {
-  const wrap = document.createElement("div");
+function renderShopping(deck) {
+  const host = document.getElementById("deck-shopping");
+  if (!host) return;
+  host.innerHTML = "";
+  host.appendChild(shoppingListEl(deck));
+}
+
+function deckMissing(deck) {
   const missing = [];
   const collect = (id, want) => {
     const owned = state.collection[id] || 0;
-    if (want > owned) missing.push({ id, name: state.cards[id]?.name || "?", need: want - owned });
+    if (want > owned && state.cards[id]) missing.push({ card: state.cards[id], need: want - owned });
   };
   if (deck.oshi) collect(deck.oshi, 1);
   Object.entries(deck.main).forEach(([id, n]) => collect(id, n));
   Object.entries(deck.cheer).forEach(([id, n]) => collect(id, n));
+  return missing;
+}
+
+function shoppingListEl(deck) {
+  const wrap = document.createElement("div");
+  const missing = deckMissing(deck);
   if (!missing.length) {
     wrap.innerHTML = `<div style="color: var(--ok); padding: 12px; background: var(--panel); border-left: 3px solid var(--ok); border-radius: 4px;">✓ 所有需要的卡都已持有</div>`;
     return wrap;
   }
   wrap.className = "shopping-list";
-  wrap.innerHTML = `<h4>缺少的卡 (${missing.reduce((a, b) => a + b.need, 0)} 張)</h4>
-    <ul>${missing.map((m) => `<li>${m.id} ${escapeText(m.name)} ×${m.need}</li>`).join("")}</ul>`;
+  wrap.innerHTML = `<h4>缺少的卡 (${missing.reduce((a, b) => a + b.need, 0)} 張)
+      <button class="shop-img-btn">匯出缺卡圖片</button></h4>
+    <ul>${missing.map((m) => `<li>${m.card.id} ${escapeText(m.card.name)} ×${m.need}</li>`).join("")}</ul>`;
+  wrap.querySelector(".shop-img-btn").addEventListener("click", () => exportMissingImage(deck));
   return wrap;
+}
+
+// ============== DECK IMAGE EXPORT (canvas) ==============
+// Uses SAME-ORIGIN thumbnails (card-img/) — the official CDN blocks cross-origin
+// canvas export, so we ship small local copies. `python make_thumbs.py` builds
+// card-img/ from scrape-cache/images; deploy that folder for online export.
+// If a thumbnail is missing the card is drawn as a labelled placeholder.
+function cachedImgSrc(card) {
+  return `card-img/${card.id}.webp`;
+}
+function loadImg(src) {
+  return new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; });
+}
+function roundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+function wrapCentered(ctx, text, cx, cy, maxW, lh) {
+  const chars = [...String(text)]; let line = ""; const lines = [];
+  for (const ch of chars) {
+    if (ctx.measureText(line + ch).width > maxW && line) { lines.push(line); line = ch; }
+    else line += ch;
+  }
+  if (line) lines.push(line);
+  const use = lines.slice(0, 4);
+  const startY = cy - (use.length - 1) * lh / 2;
+  use.forEach((l, i) => ctx.fillText(l, cx, startY + i * lh));
+}
+function drawCardCell(ctx, img, card, x, y, w, h, badge, badgeColor) {
+  if (img) {
+    ctx.save(); roundRectPath(ctx, x, y, w, h, 6); ctx.clip();
+    ctx.drawImage(img, x, y, w, h); ctx.restore();
+  } else {
+    ctx.fillStyle = "#3a3a45"; roundRectPath(ctx, x, y, w, h, 6); ctx.fill();
+    ctx.fillStyle = "#ccc"; ctx.textAlign = "center"; ctx.font = "12px sans-serif";
+    wrapCentered(ctx, card.name, x + w / 2, y + h / 2 - 4, w - 10, 14);
+    ctx.fillStyle = "#888"; ctx.font = "10px monospace"; ctx.fillText(card.id, x + w / 2, y + h - 8);
+    ctx.textAlign = "left";
+  }
+  if (badge) {
+    ctx.font = "bold 13px sans-serif"; ctx.textAlign = "center";
+    const bw = ctx.measureText(badge).width + 14;
+    ctx.fillStyle = badgeColor || "rgba(0,0,0,0.82)";
+    roundRectPath(ctx, x + w - bw - 4, y + h - 26, bw, 21, 5); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.fillText(badge, x + w - bw / 2 - 4, y + h - 11);
+    ctx.textAlign = "left";
+  }
+}
+function downloadCanvas(canvas, name) {
+  try {
+    const url = canvas.toDataURL("image/png");
+    const a = document.createElement("a"); a.href = url; a.download = name; a.click();
+  } catch (e) {
+    alert("無法輸出圖片（卡圖跨網域限制）。請在本機以 python -m http.server 執行，並確保 scrape-cache/images 存在。");
+  }
+}
+const safeName = (s) => (s || "deck").replace(/[^\w一-鿿ぁ-ヿ]/g, "_");
+
+// Left: big oshi. Right: the used cards (main then cheer) in order, with ×count.
+async function exportDeckImage(deck) {
+  const oshi = deck.oshi ? state.cards[deck.oshi] : null;
+  const entries = [];
+  Object.entries(deck.main).forEach(([id, n]) => { if (state.cards[id]) entries.push({ card: state.cards[id], count: n }); });
+  Object.entries(deck.cheer).forEach(([id, n]) => { if (state.cards[id]) entries.push({ card: state.cards[id], count: n }); });
+
+  const code = encodeDeck(deck);
+  const pad = 24, titleH = 46, W = 1000;
+  const oshiW = 260, oshiH = Math.round(oshiW / 0.716);
+  const cardW = 120, cardH = Math.round(cardW / 0.716), gap = 10;
+  const rightX = pad + (oshi ? oshiW + pad : 0);
+  const rightW = W - rightX - pad;
+  const cols = Math.max(1, Math.floor((rightW + gap) / (cardW + gap)));
+  const rows = Math.ceil(entries.length / cols) || 0;
+  const gridH = rows ? rows * (cardH + gap) - gap : 0;
+
+  // Measure the name+code caption that sits under the oshi (or top if no oshi).
+  const meas = document.createElement("canvas").getContext("2d");
+  meas.font = "12px monospace";
+  const capW = oshi ? oshiW : W - 2 * pad;
+  const codeLines = wrapLines(meas, code, capW);
+  const nameLH = 20, codeLH = 15, capGap = 10;
+  const capH = nameLH + codeLines.length * codeLH;
+  const oshiBlockH = oshi ? oshiH + capGap + capH : 0;
+  const bodyH = Math.max(oshiBlockH, gridH);
+  const H = pad + titleH + bodyH + pad;
+
+  const canvas = document.createElement("canvas"); canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#1a1a1f"; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#9a9aa6"; ctx.font = "13px sans-serif";
+  ctx.fillText(`牌組 ・ 主 ${sumCounts(deck.main)}/50 ・ 應援 ${sumCounts(deck.cheer)}/20`, pad, pad + 26);
+
+  const imgs = await Promise.all([oshi ? loadImg(cachedImgSrc(oshi)) : null, ...entries.map((e) => loadImg(cachedImgSrc(e.card)))]);
+  const bodyY = pad + titleH;
+
+  // name + code caption
+  const drawCaption = (x, y) => {
+    ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "bold 16px sans-serif";
+    ctx.fillText(clipText(ctx, deck.name || "牌組", capW), x, y + 14);
+    ctx.fillStyle = "#8a8a95"; ctx.font = "12px monospace";
+    codeLines.forEach((l, i) => ctx.fillText(l, x, y + nameLH + 11 + i * codeLH));
+  };
+
+  if (oshi) {
+    drawCardCell(ctx, imgs[0], oshi, pad, bodyY, oshiW, oshiH, "推し", "rgba(255,126,179,0.9)");
+    drawCaption(pad, bodyY + oshiH + capGap);
+  } else {
+    drawCaption(pad, bodyY);
+  }
+  entries.forEach((e, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    drawCardCell(ctx, imgs[i + 1], e.card, rightX + col * (cardW + gap), bodyY + row * (cardH + gap), cardW, cardH, "×" + e.count);
+  });
+  downloadCanvas(canvas, `${safeName(deck.name)}-${code}.png`);
+}
+
+// Split text into lines that each fit maxW (character-wrap; codes have no spaces).
+function wrapLines(ctx, text, maxW) {
+  const chars = [...String(text)]; let line = ""; const out = [];
+  for (const ch of chars) {
+    if (ctx.measureText(line + ch).width > maxW && line) { out.push(line); line = ch; }
+    else line += ch;
+  }
+  if (line) out.push(line);
+  return out;
+}
+function clipText(ctx, text, maxW) {
+  let t = String(text);
+  if (ctx.measureText(t).width <= maxW) return t;
+  while (t.length && ctx.measureText(t + "…").width > maxW) t = t.slice(0, -1);
+  return t + "…";
+}
+
+async function exportMissingImage(deck) {
+  const missing = deckMissing(deck);
+  if (!missing.length) { alert("沒有缺少的卡"); return; }
+  const pad = 24, titleH = 46, W = 1000, cardW = 120, cardH = Math.round(cardW / 0.716), gap = 10;
+  const cols = Math.max(1, Math.floor((W - 2 * pad + gap) / (cardW + gap)));
+  const rows = Math.ceil(missing.length / cols);
+  const H = pad + titleH + rows * (cardH + gap) - gap + pad;
+  const canvas = document.createElement("canvas"); canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#1a1a1f"; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#ff5e5e"; ctx.font = "bold 22px sans-serif";
+  ctx.fillText(`缺少的卡 — ${deck.name || "牌組"}`, pad, pad + 26);
+  const imgs = await Promise.all(missing.map((m) => loadImg(cachedImgSrc(m.card))));
+  const bodyY = pad + titleH;
+  missing.forEach((m, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    drawCardCell(ctx, imgs[i], m.card, pad + col * (cardW + gap), bodyY + row * (cardH + gap), cardW, cardH, "缺" + m.need, "rgba(255,94,94,0.92)");
+  });
+  downloadCanvas(canvas, `missing-${safeName(deck.name)}.png`);
 }
 
 // ============== SCAN TAB (perceptual-hash matching) ==============
@@ -1258,7 +1499,7 @@ function downloadDeckJson(deck) {
 }
 
 function importDeckPrompt() {
-  const input = prompt("貼上牌組碼 (HOCG1-…) 或牌組 JSON：\n\n⚠️ 注意：此牌組碼僅供本頁使用，與官方 Deck Log 的牌組碼不互通。");
+  const input = prompt("貼上牌組碼 (HOCG1-…)：\n\n⚠️ 注意：此牌組碼僅供本頁使用，與官方 Deck Log 的牌組碼不互通。");
   if (!input) return;
   let deck;
   try {
@@ -1274,6 +1515,7 @@ function importDeckPrompt() {
   state.currentDeckIdx = state.decks.length - 1;
   LS.save();
   renderDeckList();
+  renderDeckEditor();
   switchTab("decks");
 }
 
@@ -1366,6 +1608,7 @@ function setupBackupCode() {
       LS.save();
       renderCollection();
       renderDeckList();
+      renderDeckEditor();
       dlg.close();
       alert("還原成功");
     } catch (e) {
@@ -1374,44 +1617,7 @@ function setupBackupCode() {
   });
 }
 
-// ============== IMPORT / EXPORT (full backup) ==============
-function setupImportExport() {
-  document.getElementById("export-btn").addEventListener("click", () => {
-    const data = {
-      version: 1,
-      exported_at: new Date().toISOString(),
-      collection: state.collection,
-      decks: state.decks,
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `hololive-tcg-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  });
-  document.getElementById("import-btn").addEventListener("click", () =>
-    document.getElementById("import-file").click());
-  document.getElementById("import-file").addEventListener("change", async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (!confirm("匯入會覆蓋現有的收藏和牌組，繼續？")) return;
-    const text = await file.text();
-    try {
-      const data = JSON.parse(text);
-      state.collection = data.collection || {};
-      state.decks = data.decks || [];
-      state.currentDeckIdx = -1;
-      LS.save();
-      renderCollection();
-      renderDeckList();
-      alert("匯入成功");
-    } catch (err) {
-      alert("匯入失敗: " + err.message);
-    }
-    e.target.value = "";
-  });
-}
+// (JSON import/export UI removed by request — use the 備份碼 dialog instead.)
 
 // ============== DISCLAIMER / ABOUT ==============
 // Show disclaimer once per browser session on entry (sessionStorage clears on tab close).

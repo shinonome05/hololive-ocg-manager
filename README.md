@@ -27,10 +27,14 @@ python scrape.py
 python compute_hashes.py
 #  → 產生 hashes.json
 
-# 4. 啟動本地伺服器 (相機 API 需要 https 或 localhost)
+# 4. 產生卡圖縮圖 (牌組匯出圖片用；官網 CDN 擋跨網域 canvas，所以要同源小圖)
+python make_thumbs.py
+#  → 產生 card-img/（WebP，約 50MB）
+
+# 5. 啟動本地伺服器 (相機 API 需要 https 或 localhost)
 python -m http.server 8000
 
-# 5. 瀏覽器打開 http://localhost:8000
+# 6. 瀏覽器打開 http://localhost:8000
 ```
 
 更新卡表（出新補充包後）：刪除 `scrape-cache/index.html` 跟 `scrape-cache/search_*.html` 再跑一次 `python scrape.py`，接著 `python compute_hashes.py`（只會補算新卡）。
@@ -42,6 +46,10 @@ python -m http.server 8000
 - Netlify drop
 - Vercel
 - 任何靜態 host
+
+要放的檔：`index.html`、`style.css`、`app.js`、`cards.json`、`hashes.json`、`talents.json`、`talent-categories.json`，以及 **`card-img/`（牌組匯出圖片要用；約 50MB）**。不要放 `tag-talents.html`、`scrape-cache/`。
+
+> **線上匯出圖片**：牌組匯出圖片是把卡圖畫到 canvas 再輸出 PNG，但官網 CDN 擋跨網域 canvas 匯出，所以改用同源的 `card-img/` 縮圖。**沒有部署 `card-img/` 的話，線上匯出的圖會變成文字佔位而非真卡圖。** 改快取版本時把 `index.html` 裡的 `?v=N` 加一號。
 
 每個使用者的收藏存在他們自己的瀏覽器 localStorage，不需要後端。
 
@@ -56,6 +64,8 @@ hololive TCG Manager/
 ├── hashes.json        ← 卡圖雜湊 (compute_hashes.py 產生，掃描功能用)
 ├── talents.json          ← 藝人標記 (卡名→[藝人])
 ├── talent-categories.json← 藝人下拉的分類/清單 (分類→[藝人])
+├── card-img/          ← 卡圖縮圖 WebP (make_thumbs.py 產生，牌組匯出圖片用)
+├── make_thumbs.py     ← 一次性縮圖產生 (需 Pillow)
 ├── tag-talents.html   ← 站長專用藝人標記+分類工具（不要部署給玩家）
 ├── scrape.py          ← 一次性爬蟲
 ├── compute_hashes.py  ← 一次性卡圖雜湊計算

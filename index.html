@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Hololive OCG Manager</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 <div class="copyright-bar">
@@ -19,9 +19,6 @@
     <button class="tab" data-tab="scan">掃描 <span class="beta">測試中</span></button>
   </nav>
   <div class="header-actions">
-    <button id="export-btn" title="匯出全部備份 JSON（卡庫＋所有牌組）">⇧ 備份JSON</button>
-    <input type="file" id="import-file" accept=".json" hidden>
-    <button id="import-btn" title="從 JSON 還原全部備份">⇩ 還原JSON</button>
     <button id="backup-code-link" title="把全部收藏＋牌組轉成備份碼（可貼上分享/還原）">⧉ 備份碼</button>
   </div>
 </header>
@@ -85,7 +82,6 @@
         <select id="sort">
           <option value="id">卡號</option>
           <option value="name">名字</option>
-          <option value="hp">HP</option>
           <option value="rarity">稀有度</option>
         </select>
       </div>
@@ -110,7 +106,7 @@
       <h3>牌組</h3>
       <ul id="deck-list"></ul>
       <button id="new-deck">＋ 新增牌組</button>
-      <button id="import-deck">⇩ 匯入牌組碼/JSON</button>
+      <button id="import-deck">⇩ 匯入牌組碼</button>
     </aside>
 
     <div class="deck-editor" id="deck-editor">
@@ -184,6 +180,6 @@
   <button id="card-modal-close">關閉</button>
 </dialog>
 
-<script src="app.js" defer></script>
+<script src="app.js?v=4" defer></script>
 </body>
 </html>

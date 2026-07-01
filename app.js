@@ -581,6 +581,7 @@ function setupDeckList() {
   document.getElementById("new-deck").addEventListener("click", () => {
     state.decks.push({ name: `牌組 ${state.decks.length + 1}`, oshi: null, main: {}, cheer: {} });
     state.currentDeckIdx = state.decks.length - 1;
+    document.getElementById("deck-picker").open = false;
     LS.save();
     renderDeckList();
     renderDeckEditor();
@@ -610,6 +611,12 @@ function updateSidebarStats(deck) {
   const bar = document.querySelector(".adder-stats");
   if (bar) bar.textContent = deckStatsText(deck);
 }
+function updateDeckSummary() {
+  const s = document.getElementById("deck-summary");
+  if (!s) return;
+  const d = state.decks[state.currentDeckIdx];
+  s.textContent = d ? d.name : "選擇牌組";
+}
 
 function renderDeckList() {
   const ul = document.getElementById("deck-list");
@@ -620,11 +627,13 @@ function renderDeckList() {
     li.innerHTML = `<div>${escapeText(d.name)}</div><div class="deck-stats">${deckStatsText(d)}</div>`;
     li.addEventListener("click", () => {
       state.currentDeckIdx = i;
+      document.getElementById("deck-picker").open = false;
       renderDeckList();
       renderDeckEditor();
     });
     ul.appendChild(li);
   });
+  updateDeckSummary();
 }
 
 function renderDeckEditor() {
@@ -671,6 +680,7 @@ function deckHeaderEl(deck) {
     LS.save();
     const label = document.querySelector("#deck-list li.active > div:first-child");
     if (label) label.textContent = deck.name;
+    updateDeckSummary();
   });
   header.querySelector('[data-act="code"]').addEventListener("click", () => copyDeckCode(deck));
   header.querySelector('[data-act="img"]').addEventListener("click", () => exportDeckImage(deck));
@@ -900,6 +910,7 @@ function pickerEl(deck, predicate, section) {
       return `<div class="picker-result${owned === 0 ? " owned-0" : ""}${inDeck ? " in-deck" : ""}" data-id="${c.id}" title="${escapeAttr(c.name + " (" + c.id + ")")}">
         <img loading="lazy" width="216" height="300" src="${c.image}" alt="">
         <button class="zoom-btn" data-zoom="${c.id}" title="查看詳細" aria-label="查看詳細">🔍</button>
+        ${inDeck ? `<span class="pr-in" title="已加入牌組 ${inDeck} 張">組 ${inDeck}</span>` : ""}
         <div class="pr-meta">
           <span class="pr-id">${c.id}</span>
           <span class="pr-stats">${owned > 0 ? "持有 " + owned : "未持有"}${inDeck ? " ・組 " + inDeck : ""}</span>

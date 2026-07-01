@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Hololive OCG Manager</title>
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 <div class="copyright-bar">
@@ -102,12 +102,14 @@
 
   <!-- ============== DECKS TAB ============== -->
   <section id="decks" class="tab-panel">
-    <aside class="deck-list">
-      <h3>牌組</h3>
-      <ul id="deck-list"></ul>
-      <button id="new-deck">＋ 新增牌組</button>
-      <button id="import-deck">⇩ 匯入牌組碼</button>
-    </aside>
+    <details class="deck-list" id="deck-picker">
+      <summary id="deck-summary">選擇牌組</summary>
+      <div class="deck-menu">
+        <ul id="deck-list"></ul>
+        <button id="new-deck">＋ 新增牌組</button>
+        <button id="import-deck">⇩ 匯入牌組碼</button>
+      </div>
+    </details>
 
     <div class="deck-editor" id="deck-editor">
       <div class="empty-state">選擇或新增一個牌組</div>
@@ -180,6 +182,6 @@
   <button id="card-modal-close">關閉</button>
 </dialog>
 
-<script src="app.js?v=5" defer></script>
+<script src="app.js?v=6" defer></script>
 </body>
 </html>

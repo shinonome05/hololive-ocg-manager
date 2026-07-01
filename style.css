@@ -612,6 +612,8 @@ main { flex: 1; overflow: hidden; position: relative; }
 
 /* Deck "add cards" area: segmented pile toggle + one big collection-style browser */
 .deck-adder { margin: 16px 0; }
+.adder-bar { display: flex; flex-direction: column; gap: 6px; }
+.adder-stats { display: none; font-size: 12px; color: var(--text-dim); }
 .adder-tabs { display: flex; gap: 6px; margin-bottom: 8px; }
 .adder-tab {
   flex: 1;
@@ -1009,28 +1011,52 @@ dialog::backdrop { background: rgba(0,0,0,0.6); }
     font-size: 18px;
   }
 
-  /* Decks: deck list stacks vertically above the editor */
+  /* Decks: deck list becomes a single-row horizontal strip so it doesn't eat
+     vertical space from the picker below (used to cap at 40vh and still
+     take up to half the screen). */
   #decks { flex-direction: column; }
   .deck-list {
     width: auto;
-    flex-direction: column;
+    flex-direction: row;
+    align-items: center;
     border-right: none;
     border-bottom: 1px solid var(--border);
-    padding: 8px;
+    padding: 6px 8px;
     gap: 6px;
     flex-shrink: 0;
-    max-height: 40vh;      /* cap so the editor stays reachable; list scrolls */
-    overflow-y: auto;
+    max-height: none;
   }
-  .deck-list h3 { display: block; margin: 0 0 4px; font-size: 13px; }
-  .deck-list ul { display: block; }
-  .deck-list li { padding: 8px 10px; }
-  .deck-list li .deck-stats { font-size: 11px; }
-  #new-deck, #import-deck { flex-shrink: 0; }
+  .deck-list h3 { display: none; } /* redundant once the list is a strip of chips */
+  .deck-list ul {
+    display: flex;
+    flex: 1;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  .deck-list li {
+    flex: 0 0 auto;
+    padding: 6px 10px;
+    white-space: nowrap;
+  }
+  .deck-list li .deck-stats { font-size: 10px; }
+  #new-deck, #import-deck { flex-shrink: 0; padding: 6px 8px; font-size: 11px; white-space: nowrap; }
   .deck-editor { padding: 12px; }
   .deck-cards { grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 6px; }
   .picker-results { grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); max-height: 280px; }
   .picker-result .pr-stats { display: none; } /* save space on small screens */
+
+  /* Keep the "how many used" summary visible while scrolling the picker grid,
+     since the deck-section counts further up are no longer in view. */
+  .adder-bar {
+    position: sticky;
+    top: -12px;         /* cancels .deck-editor's padding so it truly pins to the top */
+    z-index: 5;
+    background: var(--bg);
+    padding: 8px 0 6px;
+    margin: -8px 0 0;
+  }
+  .adder-stats { display: block; }
 
   /* Scan: stack vertically; whole tab scrolls so results aren't hidden by video */
   #scan { padding: 8px; gap: 8px; overflow-y: auto; -webkit-overflow-scrolling: touch; }

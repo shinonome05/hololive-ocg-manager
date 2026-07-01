@@ -607,6 +607,8 @@ function deckStatsText(d) {
 function updateSidebarStats(deck) {
   const el = document.querySelector("#deck-list li.active .deck-stats");
   if (el) el.textContent = deckStatsText(deck);
+  const bar = document.querySelector(".adder-stats");
+  if (bar) bar.textContent = deckStatsText(deck);
 }
 
 function renderDeckList() {
@@ -741,6 +743,12 @@ function deckSectionEl(s, deck) {
 function deckAdderEl(deck) {
   const wrap = document.createElement("div");
   wrap.className = "deck-adder";
+  const bar = document.createElement("div");
+  bar.className = "adder-bar";
+  const stats = document.createElement("div");
+  stats.className = "adder-stats";
+  stats.textContent = deckStatsText(deck);
+  bar.appendChild(stats);
   const tabs = document.createElement("div");
   tabs.className = "adder-tabs";
   DECK_SECTIONS.forEach((s) => {
@@ -754,7 +762,8 @@ function deckAdderEl(deck) {
     });
     tabs.appendChild(b);
   });
-  wrap.appendChild(tabs);
+  bar.appendChild(tabs);
+  wrap.appendChild(bar);
   const host = document.createElement("div");
   host.className = "adder-picker-host";
   wrap.appendChild(host);

@@ -48102,6 +48102,55 @@
     ],
     "type": "Holomem"
   },
+  "hBP04-083_P_02": {
+    "ability_text": null,
+    "baton_pass": [
+      "colorless"
+    ],
+    "bloom_level": "Debut",
+    "card_number": "hBP04-083",
+    "color": [
+      "yellow"
+    ],
+    "hp": 90,
+    "id": "hBP04-083_P_02",
+    "illustrator": "りいちゅ",
+    "image": "https://hololive-official-cardgame.com/wp-content/images/cardlist/hPR/hBP04-083_P_02.png",
+    "included_in": [
+      "PRカード",
+      "【使用可能カード】セレクションカップ"
+    ],
+    "level": null,
+    "life": null,
+    "name": "桃鈴ねね",
+    "rarity": "P",
+    "scraped_via": "sele08",
+    "set": "hBP04",
+    "skills": [
+      {
+        "block_type": "sp_arts",
+        "header": "アーツ",
+        "icons": [
+          "◇"
+        ],
+        "text": "こんねね～　10 自分のステージのホロメンが5人以下の時、自分のデッキから、#5期生を持つDebutホロメン1枚を公開し、ステージに出せる。そしてデッキをシャッフルする。"
+      },
+      {
+        "block_type": "extra",
+        "header": "エクストラ",
+        "icons": [],
+        "text": "このホロメンはデッキに何枚でも入れられる"
+      }
+    ],
+    "support_subtype": null,
+    "tags": [
+      "#JP",
+      "#5期生",
+      "#歌",
+      "#絵"
+    ],
+    "type": "Holomem"
+  },
   "hBP04-084_C": {
     "ability_text": null,
     "baton_pass": [

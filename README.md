@@ -37,7 +37,19 @@ python -m http.server 8000
 # 6. 瀏覽器打開 http://localhost:8000
 ```
 
-更新卡表（出新補充包後）：刪除 `scrape-cache/index.html` 跟 `scrape-cache/search_*.html` 再跑一次 `python scrape.py`，接著 `python compute_hashes.py`（只會補算新卡）。
+### 更新新卡（出新補充包後）
+
+一行搞定，只抓新卡、不重爬已有的，並自動更新雜湊與縮圖：
+
+```bash
+python scrape.py update
+```
+
+`update` 會：重新讀取官網列表 → 只抓 `cards.json` 裡沒有的卡 → 合併進 `cards.json` → 自動跑 `compute_hashes.py`＋`make_thumbs.py` 補新卡的雜湊與縮圖 → 補上 `talents.json` 的新卡名（成員卡自動＝卡名）。已擁有的卡不會重抓。
+
+> 有新藝人的話，記得再開 `tag-talents.html` 分類、匯出 `talent-categories.json`，新藝人才會出現在下拉。
+> 非卡片項目（如「デッキ構築ルール」規則橫幅）會自動過濾掉。
+> 想整個重建（含既有卡的更正）才需要 `python scrape.py`（完整爬取）。
 
 ## 部署到網路
 

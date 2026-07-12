@@ -553,21 +553,23 @@ main { flex: 1; overflow: hidden; position: relative; }
   text-align: center;
   padding: 60px 0;
 }
-.deck-section { margin-bottom: 24px; }
-.deck-section h3 {
-  margin: 0 0 8px;
-  font-size: 14px;
+/* Deck contents: summary line + two panes (持有 | 未持有). */
+.deck-summary {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 12px;
+  font-size: 14px;
 }
-.deck-section h3 .count {
-  font-size: 12px;
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-}
-.deck-section h3 .count.warn { color: var(--danger); }
-.deck-section h3 .count.ok { color: var(--ok); }
+.deck-summary .count { font-variant-numeric: tabular-nums; color: var(--text-dim); }
+.deck-summary .count.warn { color: var(--danger); }
+.deck-summary .count.ok { color: var(--ok); }
+.deck-split { display: flex; gap: 16px; align-items: flex-start; }
+.deck-pane { flex: 1; min-width: 0; }
+.deck-pane > h4 { margin: 0 0 8px; font-size: 14px; }
+.deck-subsection { margin-bottom: 14px; }
+.deck-subsection h5 { margin: 0 0 4px; font-size: 12px; color: var(--text-dim); }
+.deck-empty { color: var(--text-dim); font-size: 12px; padding: 8px; }
 
 .deck-cards {
   display: grid;
@@ -1040,6 +1042,7 @@ dialog::backdrop { background: rgba(0,0,0,0.6); }
   /* Decks: picker dropdown sits as a compact top bar; editor fills the rest. */
   .deck-editor { padding: 12px; }
   .deck-cards { grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 6px; }
+  .deck-split { flex-direction: column; }   /* 持有 above, 未持有 below */
   .picker-results { grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); max-height: 280px; }
   /* keep the per-card 持有/組 counts visible so users don't scroll up to check */
   .picker-result .pr-stats { font-size: 9px; }

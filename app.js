@@ -120,12 +120,25 @@ async function init() {
   for (const arr of Object.values(state.byNumber)) {
     arr.sort((a, b) => rarityRank(a.rarity) - rarityRank(b.rarity));
   }
+  // Frozen, append-only index order for the reversible codes. The positions in
+  // these lists are what deck/backup codes reference, so they must NEVER shift
+  // when new cards are added — otherwise old codes decode to the wrong cards.
+  // code-order.json is the canonical snapshot; anything not in it (new cards) is
+  // appended at the end (sorted) so existing indices stay put. If the file is
+  // missing we fall back to plain sort (old behaviour).
+  let frozen = { numbers: [], ids: [] };
+  try { frozen = await (await fetch("code-order.json")).json(); } catch (e) {}
+  const appendOrder = (frozenList, allKeys) => {
+    const seen = new Set(frozenList);
+    const extra = allKeys.filter((k) => !seen.has(k)).sort();
+    return frozenList.concat(extra);
+  };
   // Stable index over card numbers for compact deck codes (16-bit per card).
-  state.numberList = Object.keys(state.byNumber).sort();
+  state.numberList = appendOrder(frozen.numbers || [], Object.keys(state.byNumber));
   state.numberIndex = {};
   state.numberList.forEach((n, i) => (state.numberIndex[n] = i));
   // Stable index over printing ids — backup codes track exact rarity owned.
-  state.idList = Object.keys(state.cards).sort();
+  state.idList = appendOrder(frozen.ids || [], Object.keys(state.cards));
   state.idIndex = {};
   state.idList.forEach((id, i) => (state.idIndex[id] = i));
   LS.load();
@@ -140,6 +153,8 @@ async function init() {
 
   renderCollection();
   renderDeckList();
+
+  if (location.hash === "#selftest") _selftest();
 }
 
 document.addEventListener("DOMContentLoaded", init);
@@ -702,50 +717,93 @@ function deckHeaderEl(deck) {
   return header;
 }
 
+// Deck contents split into two panes: 持有 (owned copies) | 未持有 (missing copies).
+// A partially-owned card (want 4, own 2) appears in BOTH panes with split counts.
 function renderDeckSections(deck) {
   const host = document.getElementById("deck-sections");
   if (!host) return;
   host.innerHTML = "";
-  DECK_SECTIONS.forEach((s) => host.appendChild(deckSectionEl(s, deck)));
+  host.appendChild(deckSummaryEl(deck));
+  const split = document.createElement("div");
+  split.className = "deck-split";
+  split.appendChild(deckPaneEl(deck, "owned"));
+  split.appendChild(deckPaneEl(deck, "missing"));
+  host.appendChild(split);
 }
 
-// Display of what's currently in one section (click a card = −1). No picker here.
-function deckSectionEl(s, deck) {
-  const ids = s.key === "oshi" ? (deck.oshi ? [deck.oshi] : []) : Object.keys(deck[s.key]);
-  const count = s.key === "oshi" ? (deck.oshi ? 1 : 0) : sumCounts(deck[s.key]);
-  const sec = document.createElement("section");
-  sec.className = "deck-section";
-  const klass = count === s.target ? "ok" : (count > s.target ? "warn" : "");
-  sec.innerHTML = `<h3>${s.label} (${s.target}) <span class="count ${klass}">${count}/${s.target}</span></h3>`;
-  const cards = document.createElement("div");
-  cards.className = "deck-cards";
-  ids.forEach((id) => {
-    const c = state.cards[id];
-    if (!c) return;
-    const want = s.key === "oshi" ? 1 : deck[s.key][id];
-    const owned = state.collection[id] || 0;
-    const missing = Math.max(0, want - owned);
-    const item = document.createElement("div");
-    item.className = "deck-card" + (missing > 0 ? " missing" : "");
-    item.innerHTML = `
-      <img loading="lazy" width="216" height="300" src="${c.image}" alt="${escapeAttr(c.name)}">
-      <span class="count ${missing > 0 ? "missing" : ""}">×${want}</span>`;
-    item.title = `${c.name} (${c.id}) — 持有 ${owned}` + (missing ? ` — 缺 ${missing}` : "");
-    item.addEventListener("click", (e) => {
-      if (s.key === "oshi") deck.oshi = null;
-      else if (e.shiftKey) delete deck[s.key][id];
-      else {
-        deck[s.key][id] = (deck[s.key][id] || 0) - 1;
-        if (deck[s.key][id] <= 0) delete deck[s.key][id];
-      }
-      LS.save();
-      refreshDeckAfterChange(deck);
-      if (activePickerRefresh) activePickerRefresh();
+// Per-section count/target summary (moved out of the old section headers).
+function deckSummaryEl(deck) {
+  const el = document.createElement("div");
+  el.className = "deck-summary";
+  el.innerHTML = DECK_SECTIONS.map((s) => {
+    const count = deckSectionTotal(deck, s.key);
+    const klass = count === s.target ? "ok" : (count > s.target ? "warn" : "");
+    return `<span>${s.label} <b class="count ${klass}">${count}/${s.target}</b></span>`;
+  }).join("");
+  return el;
+}
+
+// One pane. mode "owned" → ×min(want,owned); mode "missing" → ×max(0,want-owned).
+function deckPaneEl(deck, mode) {
+  const isMissing = mode === "missing";
+  const pane = document.createElement("div");
+  pane.className = "deck-pane";
+  pane.innerHTML = `<h4>${isMissing ? "未持有" : "持有"}</h4>`;
+  let any = false;
+  DECK_SECTIONS.forEach((s) => {
+    const ids = s.key === "oshi" ? (deck.oshi ? [deck.oshi] : []) : Object.keys(deck[s.key]);
+    const grid = document.createElement("div");
+    grid.className = "deck-cards";
+    ids.forEach((id) => {
+      const c = state.cards[id];
+      if (!c) return;
+      const want = s.key === "oshi" ? 1 : deck[s.key][id];
+      const owned = state.collection[id] || 0;
+      const copies = isMissing ? Math.max(0, want - owned) : Math.min(want, owned);
+      if (copies > 0) grid.appendChild(deckCardTile(c, copies, deck, s.key, isMissing));
     });
-    cards.appendChild(item);
+    if (grid.children.length) {
+      any = true;
+      const sub = document.createElement("div");
+      sub.className = "deck-subsection";
+      sub.innerHTML = `<h5>${s.label}</h5>`;
+      sub.appendChild(grid);
+      pane.appendChild(sub);
+    }
   });
-  sec.appendChild(cards);
-  return sec;
+  if (!any) pane.insertAdjacentHTML("beforeend", `<div class="deck-empty">（無）</div>`);
+  return pane;
+}
+
+// A deck card tile. `copies` = the ×N shown; click removes ONE from the deck's total
+// count for this card (shift = remove all; oshi = clear). 🔍 opens the detail modal.
+function deckCardTile(c, copies, deck, sKey, isMissing) {
+  const owned = state.collection[c.id] || 0;
+  const want = sKey === "oshi" ? 1 : deck[sKey][c.id];
+  const item = document.createElement("div");
+  item.className = "deck-card" + (isMissing ? " missing" : "");
+  item.innerHTML = `
+    <img loading="lazy" width="216" height="300" src="${c.image}" alt="${escapeAttr(c.name)}">
+    <button class="zoom-btn" title="查看詳細" aria-label="查看詳細">🔍</button>
+    <span class="count ${isMissing ? "missing" : ""}">×${copies}</span>`;
+  item.title = `${c.name} (${c.id}) — 牌組 ${want} / 持有 ${owned}` + (want > owned ? ` — 缺 ${want - owned}` : "");
+  item.querySelector(".zoom-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    showCardModal(c, variantsOf(c.card_number || c.id));
+  });
+  item.addEventListener("click", (e) => {
+    if (e.target.closest(".zoom-btn")) return;
+    if (sKey === "oshi") deck.oshi = null;
+    else if (e.shiftKey) delete deck[sKey][c.id];
+    else {
+      deck[sKey][c.id] = (deck[sKey][c.id] || 0) - 1;
+      if (deck[sKey][c.id] <= 0) delete deck[sKey][c.id];
+    }
+    LS.save();
+    refreshDeckAfterChange(deck);
+    if (activePickerRefresh) activePickerRefresh();
+  });
+  return item;
 }
 
 // The "add cards" area: a segmented toggle (which pile) + one big collection-style
@@ -896,30 +954,45 @@ function pickerEl(deck, predicate, section) {
     panel.appendChild(g);
   }
 
-  const update = () => {
-    const candidates = eligible.filter((c) => matchesFilters(c, f));
-    candidates.sort((a, b) => {
-      const oa = state.collection[a.id] || 0, ob = state.collection[b.id] || 0;
-      if ((oa > 0) !== (ob > 0)) return ob - oa;
-      return a.id.localeCompare(b.id);
-    });
-    const shown = candidates.slice(0, 60);
-    results.innerHTML = shown.map((c) => {
-      const owned = state.collection[c.id] || 0;
-      const inDeck = section === "oshi" ? (deck.oshi === c.id ? 1 : 0) : (deck[section][c.id] || 0);
-      return `<div class="picker-result${owned === 0 ? " owned-0" : ""}${inDeck ? " in-deck" : ""}" data-id="${c.id}" title="${escapeAttr(c.name + " (" + c.id + ")")}">
-        <img loading="lazy" width="216" height="300" src="${c.image}" alt="">
-        <button class="zoom-btn" data-zoom="${c.id}" title="查看詳細" aria-label="查看詳細">🔍</button>
-        ${inDeck ? `<span class="pr-in" title="已加入牌組 ${inDeck} 張">組 ${inDeck}</span>` : ""}
-        <div class="pr-meta">
-          <span class="pr-id">${c.id}</span>
-          <span class="pr-stats">${owned > 0 ? "持有 " + owned : "未持有"}${inDeck ? " ・組 " + inDeck : ""}</span>
-        </div>
-      </div>`;
-    }).join("") + (candidates.length > shown.length
-      ? `<div class="picker-more">… 共 ${candidates.length} 張，顯示前 60（縮小篩選看更多）</div>` : "");
+  const cellHtml = (c) => {
+    const owned = state.collection[c.id] || 0;
+    const inDeck = section === "oshi" ? (deck.oshi === c.id ? 1 : 0) : (deck[section][c.id] || 0);
+    return `<div class="picker-result${owned === 0 ? " owned-0" : ""}${inDeck ? " in-deck" : ""}" data-id="${c.id}" title="${escapeAttr(c.name + " (" + c.id + ")")}">
+      <img loading="lazy" width="216" height="300" src="${c.image}" alt="">
+      <button class="zoom-btn" data-zoom="${c.id}" title="查看詳細" aria-label="查看詳細">🔍</button>
+      ${inDeck ? `<span class="pr-in" title="已加入牌組 ${inDeck} 張">組 ${inDeck}</span>` : ""}
+      <div class="pr-meta">
+        <span class="pr-id">${c.id}</span>
+        <span class="pr-stats">${owned > 0 ? "持有 " + owned : "未持有"}${inDeck ? " ・組 " + inDeck : ""}</span>
+      </div>
+    </div>`;
+  };
 
-    results.querySelectorAll(".picker-result").forEach((el) => {
+  const addOrRemove = (c, e) => {
+    if (section === "oshi") {
+      deck.oshi = c.id;
+    } else if (e.shiftKey) {
+      deck[section][c.id] = Math.max(0, (deck[section][c.id] || 0) - 1);
+      if (deck[section][c.id] === 0) delete deck[section][c.id];
+    } else {
+      if (deckSectionTotal(deck, section) >= DECK_SECTION_MAX[section]) {
+        alert(`${section === "main" ? "主牌組" : "應援牌組"}已達 ${DECK_SECTION_MAX[section]} 張上限`);
+        return;
+      }
+      const limit = deckPerCardLimit(c, section);
+      if (limit !== Infinity && deckCountByNumber(deck, section, c.card_number) >= limit) {
+        alert(`「${c.name}」(${c.card_number}) 已達 ${limit} 張上限`);
+        return;
+      }
+      deck[section][c.id] = (deck[section][c.id] || 0) + 1;
+    }
+    LS.save();
+    refreshDeckAfterChange(deck);
+    update();   // update() preserves both panes' scroll
+  };
+
+  const wireGrid = (grid) => {
+    grid.querySelectorAll(".picker-result").forEach((el) => {
       el.querySelector(".zoom-btn").addEventListener("click", (e) => {
         e.stopPropagation();
         const c = state.cards[el.dataset.id];
@@ -928,33 +1001,28 @@ function pickerEl(deck, predicate, section) {
       el.addEventListener("click", (e) => {
         if (e.target.closest(".zoom-btn")) return;
         const c = state.cards[el.dataset.id];
-        if (!c) return;
-        if (section === "oshi") {
-          deck.oshi = c.id;
-        } else if (e.shiftKey) {
-          deck[section][c.id] = Math.max(0, (deck[section][c.id] || 0) - 1);
-          if (deck[section][c.id] === 0) delete deck[section][c.id];
-        } else {
-          if (deckSectionTotal(deck, section) >= DECK_SECTION_MAX[section]) {
-            alert(`${section === "main" ? "主牌組" : "應援牌組"}已達 ${DECK_SECTION_MAX[section]} 張上限`);
-            return;
-          }
-          const limit = deckPerCardLimit(c, section);
-          if (limit !== Infinity && deckCountByNumber(deck, section, c.card_number) >= limit) {
-            alert(`「${c.name}」(${c.card_number}) 已達 ${limit} 張上限`);
-            return;
-          }
-          deck[section][c.id] = (deck[section][c.id] || 0) + 1;
-        }
-        LS.save();
-        // refresh deck views + this picker's badges, keeping the browse scroll
-        refreshDeckAfterChange(deck);
-        const st = results.scrollTop; update(); results.scrollTop = st;
+        if (c) addOrRemove(c, e);
       });
     });
   };
-  // let deck-side edits (removing a card) refresh this picker's ✓ badges in place
-  activePickerRefresh = () => { const st = results.scrollTop; update(); results.scrollTop = st; };
+
+  const update = () => {
+    const candidates = eligible.filter((c) => matchesFilters(c, f));
+    candidates.sort((a, b) => {
+      const oa = state.collection[a.id] || 0, ob = state.collection[b.id] || 0;
+      if ((oa > 0) !== (ob > 0)) return ob - oa;   // owned first
+      return a.id.localeCompare(b.id);
+    });
+    const shown = candidates.slice(0, 60);
+    const st = results.scrollTop;
+    results.innerHTML = shown.map(cellHtml).join("")
+      + (candidates.length > shown.length
+        ? `<div class="picker-more">… 共 ${candidates.length} 張，顯示前 60（縮小篩選看更多）</div>` : "");
+    wireGrid(results);
+    results.scrollTop = st;   // keep browse position across re-renders
+  };
+  // let deck-side edits (removing a card) refresh this picker's badges in place
+  activePickerRefresh = update;
 
   toolbar.querySelector("input").addEventListener("input", debounce((e) => { f.kw = e.target.value; update(); }, 150));
   toolbar.querySelector(".picker-filter-toggle").addEventListener("click", (e) => {
@@ -1541,11 +1609,26 @@ function importDeckPrompt() {
 
 // ============== FULL BACKUP CODE (reversible, collection + decks) ==============
 // Compact binary of the whole library + all decks, by 16-bit printing-id index, so
-// exact rarities are preserved. Long but pasteable; for big collections use the
-// JSON file instead. Prefix HOCGX1-.
-const BACKUP_CODE_PREFIX = "HOCGX1-";
+// exact rarities are preserved. The byte payload is the same as before; HOCGX2-
+// wraps it in native deflate to keep big collections short. HOCGX1- (raw) is still
+// emitted when it happens to be shorter, and always accepted on import.
+const BACKUP_CODE_PREFIX = "HOCGX1-";   // v1: raw bytes → base64
+const BACKUP_CODE_PREFIX2 = "HOCGX2-";  // v2: deflate-raw(bytes) → base64
 
-function encodeBackup() {
+// Native browser (de)compression — no library. Draining the stream via Response
+// is the tidy built-in way to collect its output.
+async function deflateRaw(bytes) {
+  const cs = new CompressionStream("deflate-raw");
+  const w = cs.writable.getWriter(); w.write(bytes); w.close();
+  return new Uint8Array(await new Response(cs.readable).arrayBuffer());
+}
+async function inflateRaw(bytes) {
+  const ds = new DecompressionStream("deflate-raw");
+  const w = ds.writable.getWriter(); w.write(bytes); w.close();
+  return new Uint8Array(await new Response(ds.readable).arrayBuffer());
+}
+
+function buildBackupBytes() {
   const bytes = [1];
   const push16 = (n) => bytes.push((n >> 8) & 0xff, n & 0xff);
   const pushIdEntry = (id, cnt) => { push16(state.idIndex[id] ?? 0xffff); bytes.push(Math.min(255, cnt)); };
@@ -1569,13 +1652,29 @@ function encodeBackup() {
       for (const [id, c] of entries) pushIdEntry(id, c);
     }
   }
-  return BACKUP_CODE_PREFIX + b64urlEncode(bytes);
+  return bytes;
 }
 
-function decodeBackup(code) {
+async function encodeBackup() {
+  const bytes = buildBackupBytes();
+  const raw = BACKUP_CODE_PREFIX + b64urlEncode(bytes);
+  try {
+    const packed = BACKUP_CODE_PREFIX2 + b64urlEncode(await deflateRaw(Uint8Array.from(bytes)));
+    return packed.length < raw.length ? packed : raw;   // never emit the longer one
+  } catch (e) {
+    return raw;   // CompressionStream unsupported → plain v1
+  }
+}
+
+async function decodeBackup(code) {
   code = code.trim();
-  if (code.startsWith(BACKUP_CODE_PREFIX)) code = code.slice(BACKUP_CODE_PREFIX.length);
-  const b = b64urlDecode(code);
+  let b;
+  if (code.startsWith(BACKUP_CODE_PREFIX2)) {
+    b = await inflateRaw(b64urlDecode(code.slice(BACKUP_CODE_PREFIX2.length)));
+  } else {
+    if (code.startsWith(BACKUP_CODE_PREFIX)) code = code.slice(BACKUP_CODE_PREFIX.length);
+    b = b64urlDecode(code);
+  }
   let p = 0;
   if (b[p++] !== 1) throw new Error("不支援的備份碼版本");
   const read16 = () => { const v = (b[p] << 8) | b[p + 1]; p += 2; return v; };
@@ -1611,17 +1710,17 @@ function setupBackupCode() {
   document.getElementById("backup-code-link").addEventListener("click", () => { ta.value = ""; dlg.showModal(); });
   document.getElementById("backup-code-close").addEventListener("click", () => dlg.close());
   dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
-  document.getElementById("backup-gen").addEventListener("click", () => {
-    ta.value = encodeBackup();
+  document.getElementById("backup-gen").addEventListener("click", async () => {
+    ta.value = await encodeBackup();
     ta.select();
     navigator.clipboard?.writeText(ta.value).catch(() => {});
   });
-  document.getElementById("backup-restore").addEventListener("click", () => {
+  document.getElementById("backup-restore").addEventListener("click", async () => {
     const code = ta.value.trim();
     if (!code) { alert("請先貼上備份碼"); return; }
     if (!confirm("從備份碼還原會覆蓋現有的收藏和牌組，繼續？")) return;
     try {
-      const data = decodeBackup(code);
+      const data = await decodeBackup(code);
       state.collection = data.collection;
       state.decks = data.decks;
       state.currentDeckIdx = -1;
@@ -1763,8 +1862,9 @@ function escapeAttr(s) {
   return escapeText(s).replace(/"/g, "&quot;");
 }
 
-// ponytail: self-test for the hamming math the matcher depends on
-function _selftest() {
+// ponytail: self-test for the hamming math + the reversible codes.
+// Runs after init() so state (card index) is populated.
+async function _selftest() {
   console.assert(popcount(0) === 0);
   console.assert(popcount(0xffffffff >>> 0) === 32);
   console.assert(popcount(0b1011) === 3);
@@ -1775,5 +1875,33 @@ function _selftest() {
   // one nibble (4 bits) different in the low word
   console.assert(hammingHex("000000000000000f", { hi: 0, lo: 0 }) === 4);
   console.log("selftest: hamming OK");
+
+  // ---- reversible code round-trips ----
+  const oshi = Object.values(state.cards).find((c) => c.type === "Oshi");
+  const holo = Object.values(state.cards).find((c) => c.type === "Holomem");
+  const cheer = Object.values(state.cards).find((c) => c.type === "Cheer");
+  const d = { name: "t", oshi: oshi ? oshi.id : null,
+              main: holo ? { [holo.id]: 3 } : {}, cheer: cheer ? { [cheer.id]: 5 } : {} };
+  const dc = encodeDeck(d);
+  const d2 = decodeDeck(dc);
+  console.assert(!!d2.oshi === !!d.oshi, "deck oshi round-trip");
+  console.assert(sumCounts(d2.main) === sumCounts(d.main), "deck main total round-trip");
+  console.assert(sumCounts(d2.cheer) === sumCounts(d.cheer), "deck cheer total round-trip");
+
+  // stability: appending a future card must NOT shift existing codes (append-only invariant)
+  if (holo) {
+    const beforeId = Object.keys(decodeDeck(dc).main)[0];
+    const fake = "zzzz-999";
+    state.numberList.push(fake); state.numberIndex[fake] = state.numberList.length - 1;
+    console.assert(Object.keys(decodeDeck(dc).main)[0] === beforeId,
+      "stability: appended card must not shift existing deck codes");
+    delete state.numberIndex[fake]; state.numberList.pop();
+  }
+
+  // backup code (v2 deflate path) round-trips collection + decks
+  const coll0 = Object.fromEntries(Object.entries(state.collection).filter(([, c]) => c > 0));
+  const restored = await decodeBackup(await encodeBackup());
+  console.assert(JSON.stringify(restored.collection) === JSON.stringify(coll0), "backup collection round-trip");
+  console.assert(restored.decks.length === state.decks.length, "backup decks round-trip");
+  console.log("selftest: codes OK");
 }
-if (location.hash === "#selftest") _selftest();

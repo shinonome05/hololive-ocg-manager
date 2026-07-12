@@ -45,7 +45,7 @@ python -m http.server 8000
 python scrape.py update
 ```
 
-`update` 會：重新讀取官網列表 → 只抓 `cards.json` 裡沒有的卡 → 合併進 `cards.json` → 自動跑 `compute_hashes.py`＋`make_thumbs.py` 補新卡的雜湊與縮圖 → 補上 `talents.json` 的新卡名（成員卡自動＝卡名）。已擁有的卡不會重抓。
+`update` 會：重新讀取官網列表 → 只抓 `cards.json` 裡沒有的卡 → 合併進 `cards.json` → 自動跑 `compute_hashes.py`＋`make_thumbs.py` 補新卡的雜湊與縮圖 → 補上 `talents.json` 的新卡名（成員卡自動＝卡名）→ 把新卡追加到 `code-order.json`（凍結引繼碼的 index 順序）。已擁有的卡不會重抓。
 
 > 有新藝人的話，記得再開 `tag-talents.html` 分類、匯出 `talent-categories.json`，新藝人才會出現在下拉。
 > 非卡片項目（如「デッキ構築ルール」規則橫幅）會自動過濾掉。
@@ -59,7 +59,9 @@ python scrape.py update
 - Vercel
 - 任何靜態 host
 
-要放的檔：`index.html`、`style.css`、`app.js`、`cards.json`、`hashes.json`、`talents.json`、`talent-categories.json`，以及 **`card-img/`（牌組匯出圖片要用；約 50MB）**。不要放 `tag-talents.html`、`scrape-cache/`。
+要放的檔：`index.html`、`style.css`、`app.js`、`cards.json`、`hashes.json`、`talents.json`、`talent-categories.json`、`code-order.json`，以及 **`card-img/`（牌組匯出圖片要用；約 50MB）**。不要放 `tag-talents.html`、`scrape-cache/`。
+
+> **`code-order.json` 一定要一起部署**：引繼碼（牌組碼／備份碼）用「卡片在此清單的位置」編碼。缺這檔會退回每次重新排序，改版新增卡片就會讓既有引繼碼解出錯卡。`update` 只會把新卡追加到尾端、不重排。
 
 > **線上匯出圖片**：牌組匯出圖片是把卡圖畫到 canvas 再輸出 PNG，但官網 CDN 擋跨網域 canvas 匯出，所以改用同源的 `card-img/` 縮圖。**沒有部署 `card-img/` 的話，線上匯出的圖會變成文字佔位而非真卡圖。** 改快取版本時把 `index.html` 裡的 `?v=N` 加一號。
 
@@ -76,6 +78,7 @@ hololive TCG Manager/
 ├── hashes.json        ← 卡圖雜湊 (compute_hashes.py 產生，掃描功能用)
 ├── talents.json          ← 藝人標記 (卡名→[藝人])
 ├── talent-categories.json← 藝人下拉的分類/清單 (分類→[藝人])
+├── code-order.json       ← 引繼碼 index 凍結順序 (scrape.py update 維護，只追加)
 ├── card-img/          ← 卡圖縮圖 WebP (make_thumbs.py 產生，牌組匯出圖片用)
 ├── make_thumbs.py     ← 一次性縮圖產生 (需 Pillow)
 ├── tag-talents.html   ← 站長專用藝人標記+分類工具（不要部署給玩家）
@@ -84,7 +87,7 @@ hololive TCG Manager/
 └── scrape-cache/      ← HTTP / 卡圖快取 (重跑時省流量)
 ```
 
-部署上線時放 `cards.json`、`hashes.json`、`talents.json`、`talent-categories.json`（純靜態檔，全使用者共用）。
+部署上線時放 `cards.json`、`hashes.json`、`talents.json`、`talent-categories.json`、`code-order.json`（純靜態檔，全使用者共用）。
 `tag-talents.html` 是站長標記工具，**不需要也不建議部署給玩家**。
 
 ## 藝人標記與分類
